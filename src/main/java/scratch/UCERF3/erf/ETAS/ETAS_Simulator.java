@@ -75,6 +75,17 @@ import scratch.UCERF3.utils.RELM_RegionUtils;
 import scratch.UCERF3.utils.U3FaultSystemIO;
 import scratch.UCERF3.utils.U3_EqkCatalogStatewideCompleteness;
 
+import java.util.ListIterator;
+
+import org.opensha.sha.imr.ScalarIMR;
+import org.opensha.sha.imr.attenRelImpl.NGAWest_2014_Averaged_AttenRel;
+import org.opensha.commons.data.Site;
+import org.opensha.sha.imr.param.SiteParams.Vs30_Param;
+import org.opensha.sha.imr.param.SiteParams.Vs30_TypeParam;
+import org.opensha.sha.imr.param.SiteParams.DepthTo2pt5kmPerSecParam;
+import org.opensha.sha.imr.param.SiteParams.DepthTo1pt0kmPerSecParam;
+
+
 public class ETAS_Simulator {
 	
 	public static boolean D=true; // debug flag
@@ -207,6 +218,9 @@ public class ETAS_Simulator {
 		Writer info_fr = new BufferedWriter(new FileWriter(new File(resultsDir, "infoString.txt")), bufferSize);
 		Writer simulatedEventsFileWriter = new BufferedWriter(new FileWriter(new File(resultsDir, "simulatedEvents.txt")), bufferSize);
 		ETAS_CatalogIO.writeEventHeaderToFile(simulatedEventsFileWriter);
+
+		Writer simulatedIMsFileWriter = new BufferedWriter(new FileWriter(new File(resultsDir, "simulatedIMs.txt")), bufferSize);
+		ETAS_CatalogIO.writeIMHeaderToFile(simulatedIMsFileWriter);
 
 		info_fr.write(simulationName+"\n");
 		info_fr.write("\nrandomSeed="+etas_utils.getRandomSeed()+"\n");
@@ -625,6 +639,23 @@ public class ETAS_Simulator {
 		
 		final double maxPointSourceMag = etasParams.getMaxPointSourceMag();
 		
+		// Instantiate IMR
+		ScalarIMR imr = new NGAWest_2014_Averaged_AttenRel(null);
+		imr.setIntensityMeasure("SA");
+		// Instantiate Site
+		Site site = new Site(new Location(37.871, -122.259));
+		// Add site parameters
+		site.addParameter(new Vs30_Param());
+		site.addParameter(new Vs30_TypeParam());
+		site.addParameter(new DepthTo2pt5kmPerSecParam());
+		site.addParameter(new DepthTo1pt0kmPerSecParam());
+		site.getParameter("Vs30").setValue(733.4);
+		site.getParameter("Vs30 Type").setValue(Vs30_TypeParam.VS30_TYPE_INFERRED);
+		site.getParameter("Depth 2.5 km/sec").setValue(0.88);
+		site.getParameter("Depth 1.0 km/sec").setValue(70.0);
+		imr.setUserMaxDistance(200);
+		imr.setSite(site);
+
 		while(eventsToProcess.size()>0) {
 			
 			if (progressBar != null) progressBar.updateProgress(numSimulatedEvents, eventsToProcess.size()+numSimulatedEvents);
@@ -712,6 +743,9 @@ public class ETAS_Simulator {
 			ETAS_CatalogIO.writeEventToFile(simulatedEventsFileWriter, rup);
 			
 			long rupOT = rup.getOriginTime();
+
+			imr.setEqkRupture(rup);
+			ETAS_CatalogIO.writeIMToFile(simulatedIMsFileWriter, imr);
 			
 			// now sample primary aftershock times for this event (this should be in a method because it's redundant with code above)
 			if(includeIndirectTriggering) {
@@ -928,6 +962,7 @@ public class ETAS_Simulator {
 				simulationStartTime, System.currentTimeMillis(), ETAS_Utils.magMin_DEFAULT, simulatedRupsQueue);
 		ETAS_CatalogIO.writeMetadataToFile(simulatedEventsFileWriter, meta);
 		simulatedEventsFileWriter.close();
+		simulatedIMsFileWriter.close();
 
 		ETAS_SimAnalysisTools.writeMemoryUse("Memory at end of simultation");
 		return meta;

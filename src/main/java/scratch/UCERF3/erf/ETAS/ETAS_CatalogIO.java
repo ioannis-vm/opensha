@@ -52,6 +52,9 @@ import com.google.common.io.ByteStreams;
 import com.google.common.io.CharStreams;
 import com.google.common.io.Files;
 
+import org.opensha.sha.imr.ScalarIMR;
+import org.opensha.sha.imr.param.IntensityMeasureParams.SA_Param;
+
 public class ETAS_CatalogIO {
 
 	/*
@@ -105,6 +108,47 @@ public class ETAS_CatalogIO {
 	public static final String EVENT_FILE_HEADER = "Year\tMonth\tDay\tHour\tMinute\tSec\tLat\tLon\tDepth\tMagnitude\t"
 				+ "ID\tparID\tGen\tOrigTime\tdistToParent\tnthERFIndex\tFSS_ID\tGridNodeIndex\tETAS_k";
 	
+
+	/**
+	 * This writes the header associated with the writeIMDataToFile(*) method
+	 * 
+	 * @param fileWriter
+	 * @throws IOException
+	 */
+	public static void writeIMHeaderToFile(Writer fileWriter) throws IOException {
+		// Write metadata for periods
+		fileWriter.write("% PERIODS = " + Arrays.toString(PERIODS) + "\n");
+		// Write the standard header line
+		fileWriter.write("% " + IM_FILE_HEADER + "\n");
+	}
+
+	private static final double[] PERIODS = { 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.75,
+			1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.5, 10.0 };
+	public static final String IM_FILE_HEADER = createIMFileHeader();
+
+	private static String createIMFileHeader() {
+		StringBuilder header = new StringBuilder();
+		for (double period : PERIODS) {
+			header.append(periodToString(period)).append("m\t");
+		}
+		for (double period : PERIODS) {
+			header.append(periodToString(period)).append("s\t");
+		}
+		// Remove the last tab character
+		if (header.length() > 0) {
+			header.setLength(header.length() - 1);
+		}
+		return header.toString();
+	}
+
+	private static String periodToString(double period) {
+		return period == (int) period ? Integer.toString((int) period) : periodToFormattedString(period);
+	}
+
+	private static String periodToFormattedString(double period) {
+		return String.valueOf(period).replace(".", "p");
+	}
+
 	public static void writeMetadataToFile(Writer fw, ETAS_SimulationMetadata meta) throws IOException {
 		fw.write("% ------------ METADATA -------------\n");
 		fw.write("% numRuptures = "+meta.totalNumRuptures+"\n");
@@ -172,7 +216,40 @@ public class ETAS_CatalogIO {
 		sb.append(rup.getFSSIndex()).append("\t");
 		sb.append(rup.getGridNodeIndex()).append("\t");
 		sb.append(rup.getETAS_k());
-		
+
+		return sb.toString();
+	}
+
+	/**
+	 * This writes the given IM to the given fileWriter
+	 * 
+	 * @param fileWriter
+	 * @param imr
+	 * @throws IOException
+	 */
+	public static void writeIMToFile(Writer fileWriter, ScalarIMR imr) throws IOException {
+		fileWriter.write(getIMFileLine(imr) + "\n");
+	}
+
+	public static String getIMFileLine(ScalarIMR imr) {
+		StringBuilder sb = new StringBuilder();
+		SA_Param saParam = (SA_Param) imr.getIntensityMeasure();
+
+		for (double period : PERIODS) {
+			SA_Param.setPeriodInSA_Param(saParam, period);
+			sb.append(imr.getMean()).append("\t");
+		}
+
+		for (double period : PERIODS) {
+			SA_Param.setPeriodInSA_Param(saParam, period);
+			sb.append(imr.getStdDev()).append("\t");
+		}
+
+		// Remove the last tab character
+		if (sb.length() > 0) {
+			sb.setLength(sb.length() - 1);
+		}
+
 		return sb.toString();
 	}
 
