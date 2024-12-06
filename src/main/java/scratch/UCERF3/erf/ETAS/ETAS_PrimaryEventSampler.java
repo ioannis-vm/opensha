@@ -4352,10 +4352,10 @@ double maxCharFactor = maxRate/cubeRateBeyondDistThresh;
 				}
 			}
 			
+			double aveDip = erf_rup.getRuptureSurface().getAveDip();
 			if(erf_rup.getMag()<maxPointSourceMag)
-				rupToFillIn.setPointSurface(hypLoc);
+				rupToFillIn.setPointSurface(hypLoc, aveDip);
 			else {
-				double aveDip = erf_rup.getRuptureSurface().getAveDip(); // confirm this works
 				rupToFillIn.setRuptureSurface(etas_utils.getRandomFiniteRupSurface(erf_rup.getMag(), hypLoc, aveDip));
 			}
 			// fill in the rest
