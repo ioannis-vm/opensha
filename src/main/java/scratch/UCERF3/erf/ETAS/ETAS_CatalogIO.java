@@ -53,7 +53,11 @@ import com.google.common.io.CharStreams;
 import com.google.common.io.Files;
 
 import org.opensha.sha.imr.ScalarIMR;
+import org.opensha.sha.imr.attenRelImpl.NGAWest_2014_Averaged_AttenRel;
 import org.opensha.sha.imr.param.IntensityMeasureParams.SA_Param;
+
+import org.opensha.sha.faultSurface.RuptureSurface;
+import org.opensha.sha.faultSurface.PointSurface;
 
 public class ETAS_CatalogIO {
 
@@ -71,7 +75,7 @@ public class ETAS_CatalogIO {
 	 * This writes simulated event data to a file.
 	 */
 	public static void writeEventDataToFile(File file, Collection<ETAS_EqkRupture> simulatedRupsQueue)
-			throws IOException {
+		throws IOException {
 		FileWriter fw1 = new FileWriter(file);
 		writeEventDataToWriter(fw1, simulatedRupsQueue);
 		fw1.close();
@@ -81,7 +85,7 @@ public class ETAS_CatalogIO {
 	 * This writes simulated event data to a file.
 	 */
 	public static void writeEventDataToWriter(Writer writer, Collection<ETAS_EqkRupture> simulatedRupsQueue)
-			throws IOException {
+		throws IOException {
 		if (simulatedRupsQueue instanceof ETAS_Catalog && ((ETAS_Catalog)simulatedRupsQueue).getSimulationMetadata() != null) {
 			writeMetadataToFile(writer, ((ETAS_Catalog)simulatedRupsQueue).getSimulationMetadata());
 			writer.write("% \n");
@@ -106,38 +110,39 @@ public class ETAS_CatalogIO {
 	}
 	
 	public static final String EVENT_FILE_HEADER = "Year\tMonth\tDay\tHour\tMinute\tSec\tLat\tLon\tDepth\tMagnitude\t"
-				+ "ID\tparID\tGen\tOrigTime\tdistToParent\tnthERFIndex\tFSS_ID\tGridNodeIndex\tETAS_k";
+		+ "ID\tparID\tGen\tOrigTime\tdistToParent\tnthERFIndex\tFSS_ID\tGridNodeIndex\tETAS_k";
 	
 
 	/**
-	 * This writes the header associated with the writeIMDataToFile(*) method
-	 * 
-	 * @param fileWriter
-	 * @throws IOException
+	 * Writes the header line used in the GMMInput data output file.
+	 * This includes a comment line with the period values, followed by the tab-separated field names.
+	 *
+	 * @param fileWriter the writer to which the header line will be written
+	 * @throws IOException if the write fails
 	 */
-	public static void writeIMHeaderToFile(Writer fileWriter) throws IOException {
-		// Write metadata for periods
-		fileWriter.write("% PERIODS = " + Arrays.toString(PERIODS) + "\n");
+	public static void writeGMMInputHeaderToFile(Writer fileWriter) throws IOException {
 		// Write the standard header line
-		fileWriter.write("% " + IM_FILE_HEADER + "\n");
+		fileWriter.write("% " + GMMINPUT_FILE_HEADER + "\n");
 	}
 
-	private static final double[] PERIODS = { 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.75,
-			1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.5, 10.0 };
-	public static final String IM_FILE_HEADER = createIMFileHeader();
+	// Tab-separated header for predictor variables
+	public static final String GMMINPUT_FILE_HEADER = createGMMInputFileHeader();
 
-	private static String createIMFileHeader() {
+	private static String createGMMInputFileHeader() {
+		String[] headers = {
+			"surfaceType", "rake", "dip", "ztor", "hypo_depth", "width", "rrup", "rjb", "rx"
+		};
+
 		StringBuilder header = new StringBuilder();
-		for (double period : PERIODS) {
-			header.append(periodToString(period)).append("m\t");
+		for (String name : headers) {
+			header.append(name).append("\t");
 		}
-		for (double period : PERIODS) {
-			header.append(periodToString(period)).append("s\t");
-		}
-		// Remove the last tab character
-		if (header.length() > 0) {
+
+		// Remove trailing tab
+		if (header.length() > 0 && header.charAt(header.length() - 1) == '\t') {
 			header.setLength(header.length() - 1);
 		}
+
 		return header.toString();
 	}
 
@@ -157,10 +162,10 @@ public class ETAS_CatalogIO {
 			fw.write("% catalogIndex = "+meta.catalogIndex+"\n");
 		if (meta.rangeHistCatalogIDs != null)
 			fw.write("% rangeHistCatalogIDs = ["+meta.rangeHistCatalogIDs.lowerEndpoint()
-				+" "+meta.rangeHistCatalogIDs.upperEndpoint()+"]\n");
+					 +" "+meta.rangeHistCatalogIDs.upperEndpoint()+"]\n");
 		if (meta.rangeTriggerRupIDs != null)
 			fw.write("% triggerRupParentIDs = ["+meta.rangeTriggerRupIDs.lowerEndpoint()
-				+" "+meta.rangeTriggerRupIDs.upperEndpoint()+"]\n");
+					 +" "+meta.rangeTriggerRupIDs.upperEndpoint()+"]\n");
 		fw.write("% simulationStartTime = "+meta.simulationStartTime+"\n");
 		fw.write("% simulationEndTime = "+meta.simulationEndTime+"\n");
 		fw.write("% numSpontaneousRuptures = "+meta.numSpontaneousRuptures+"\n");
@@ -221,32 +226,45 @@ public class ETAS_CatalogIO {
 	}
 
 	/**
-	 * This writes the given IM to the given fileWriter
+	 * This writes GMM input to the given fileWriter
 	 * 
 	 * @param fileWriter
 	 * @param imr
 	 * @throws IOException
 	 */
-	public static void writeIMToFile(Writer fileWriter, ScalarIMR imr) throws IOException {
-		fileWriter.write(getIMFileLine(imr) + "\n");
+	public static void writeGMMInputToFile(Writer fileWriter, NGAWest_2014_Averaged_AttenRel imr) throws IOException {
+		fileWriter.write(getGMMInputFileLine(imr) + "\n");
 	}
 
-	public static String getIMFileLine(ScalarIMR imr) {
+	public static String getGMMInputFileLine(NGAWest_2014_Averaged_AttenRel imr) {
 		StringBuilder sb = new StringBuilder();
-		SA_Param saParam = (SA_Param) imr.getIntensityMeasure();
+		RuptureSurface surface = imr.getEqkRupture().getRuptureSurface();
+		ScalarIMR inner = imr.getIMRs().get(0);
 
-		for (double period : PERIODS) {
-			SA_Param.setPeriodInSA_Param(saParam, period);
-			sb.append(imr.getMean()).append("\t");
+		sb.append(surface.getClass().getSimpleName()).append("\t");
+
+		// Rupture parameters to extract
+		String[] ruptureParams = {
+			"Rake", "Dip", "Rupture Top Depth", "Focal Depth", "Down-Dip Width"
+		};
+		//  (hypocenter Depth) is always equal to Dip for PointSurfaces, omitting.
+		//  is always set to 0.1 for PointSurfaces, omitting.
+
+		for (String param : ruptureParams) {
+			sb.append(inner.getEqkRuptureParams().getParameter(param).getValue()).append("\t");
 		}
 
-		for (double period : PERIODS) {
-			SA_Param.setPeriodInSA_Param(saParam, period);
-			sb.append(imr.getStdDev()).append("\t");
+		// Propagation parameters to extract
+		String[] distanceParams = {
+			"DistanceRup", "DistanceJB", "DistanceX"
+		};
+
+		for (String param : distanceParams) {
+			sb.append(inner.getPropagationEffectParams().getParameter(param).getValue()).append("\t");
 		}
 
-		// Remove the last tab character
-		if (sb.length() > 0) {
+		// Remove the last tab character (if not empty and ends with tab)
+		if (sb.length() > 0 && sb.charAt(sb.length() - 1) == '\t') {
 			sb.setLength(sb.length() - 1);
 		}
 
@@ -264,7 +282,7 @@ public class ETAS_CatalogIO {
 
 		String[] split = line.split("\t");
 		Preconditions.checkState(split.length == 10 || split.length == 12 || split.length == 18 || split.length == 19,
-				"Line has unexpected number of items. Expected 10/12/18/19, got %s. Line: %s", split.length, line);
+								 "Line has unexpected number of items. Expected 10/12/18/19, got %s. Line: %s", split.length, line);
 
 		int nthERFIndex, fssIndex, gridNodeIndex, id, parentID, gen;
 		long origTime;
@@ -371,7 +389,7 @@ public class ETAS_CatalogIO {
 	}
 
 	public static ETAS_Catalog loadCatalog(File catalogFile, double minMag, boolean ignoreFailure)
-			throws IOException {
+		throws IOException {
 		if (isBinary(catalogFile))
 			return loadCatalogBinary(catalogFile, minMag);
 		ETAS_Catalog catalog = new ETAS_Catalog(null);
@@ -415,21 +433,21 @@ public class ETAS_CatalogIO {
 		long randomSeed = metaValues.containsKey("randomSeed") ? Long.parseLong(metaValues.get("randomSeed")) : -1l;
 		int catalogIndex = metaValues.containsKey("catalogIndex") ? Integer.parseInt(metaValues.get("catalogIndex")) : -1;
 		Range<Integer> rangeHistCatalogIDs = metaValues.containsKey("rangeHistCatalogIDs")
-				? loadRangeASCII(metaValues.get("rangeHistCatalogIDs")) : null;
+			? loadRangeASCII(metaValues.get("rangeHistCatalogIDs")) : null;
 		Range<Integer> rangeTriggerRupIDs = metaValues.containsKey("triggerRupParentIDs")
-				? loadRangeASCII(metaValues.get("triggerRupParentIDs")) : null;
+			? loadRangeASCII(metaValues.get("triggerRupParentIDs")) : null;
 		long simulationStartTime = metaValues.containsKey("simulationStartTime")
-				? Long.parseLong(metaValues.get("simulationStartTime")) : -1l;
+			? Long.parseLong(metaValues.get("simulationStartTime")) : -1l;
 		long simulationEndTime = metaValues.containsKey("simulationEndTime")
-				? Long.parseLong(metaValues.get("simulationEndTime")) : -1l;
+			? Long.parseLong(metaValues.get("simulationEndTime")) : -1l;
 		int numSpontaneousRuptures = metaValues.containsKey("numSpontaneousRuptures")
-				? Integer.parseInt(metaValues.get("numSpontaneousRuptures")) : -1;
+			? Integer.parseInt(metaValues.get("numSpontaneousRuptures")) : -1;
 		int numSupraSeis = metaValues.containsKey("numSupraSeis")
-				? Integer.parseInt(metaValues.get("numSupraSeis")) : -1;
+			? Integer.parseInt(metaValues.get("numSupraSeis")) : -1;
 		double minMag = metaValues.containsKey("minMag") ? Double.parseDouble(metaValues.get("minMag")) : Double.NaN;
 		double maxMag = metaValues.containsKey("maxMag") ? Double.parseDouble(metaValues.get("maxMag")) : Double.NaN;
 		return ETAS_SimulationMetadata.instance(totalNumRuptures, randomSeed, catalogIndex, rangeHistCatalogIDs, rangeTriggerRupIDs,
-				simulationStartTime, simulationEndTime, numSpontaneousRuptures, numSupraSeis, minMag, maxMag);
+												simulationStartTime, simulationEndTime, numSpontaneousRuptures, numSupraSeis, minMag, maxMag);
 	}
 	
 	private static Range<Integer> loadRangeASCII(String valStr) {
@@ -464,7 +482,7 @@ public class ETAS_CatalogIO {
 	}
 	
 	public static ETAS_Catalog loadCatalog(InputStream catalogStream, double minMag, boolean ignoreFailure)
-			throws IOException {
+		throws IOException {
 		ETAS_Catalog catalog = new ETAS_Catalog(null);
 		BufferedReader reader = new BufferedReader(new InputStreamReader(catalogStream));
 
@@ -760,7 +778,7 @@ public class ETAS_CatalogIO {
 			double minMag = in.readDouble();
 			double maxMag = in.readDouble();
 			return ETAS_SimulationMetadata.instance(totalNumRuptures, randomSeed, catalogIndex, rangeHistCatalogIDs, rangeTriggerRupIDs,
-					simulationStartTime, simulationEndTime, numSpontaneousRuptures, numSupraSeis, minMag, maxMag);
+													simulationStartTime, simulationEndTime, numSpontaneousRuptures, numSupraSeis, minMag, maxMag);
 		}
 		return null;
 	}
@@ -838,12 +856,12 @@ public class ETAS_CatalogIO {
 	}
 	
 	public static List<ETAS_Catalog> loadCatalogs(File zipFile, double minMag)
-			throws ZipException, IOException {
+		throws ZipException, IOException {
 		return loadCatalogs(zipFile, minMag, false);
 	}
 
 	public static List<ETAS_Catalog> loadCatalogs(File zipFile, double minMag, boolean ignoreFailure)
-			throws ZipException, IOException {
+		throws ZipException, IOException {
 		if (isBinary(zipFile))
 			return loadCatalogsBinary(zipFile, minMag);
 		ZipFile zip = new ZipFile(zipFile);
@@ -862,7 +880,7 @@ public class ETAS_CatalogIO {
 
 			try {
 				ETAS_Catalog cat = loadCatalog(
-						zip.getInputStream(catEntry), minMag, ignoreFailure);
+											   zip.getInputStream(catEntry), minMag, ignoreFailure);
 
 				catalogs.add(cat);
 			} catch (Exception e) {
@@ -889,7 +907,7 @@ public class ETAS_CatalogIO {
 			Preconditions.checkState(Double.isNaN(actual.getDistanceToParent()));
 		else
 			Preconditions.checkState(expected.getDistanceToParent() == actual.getDistanceToParent(),
-			"%s != %s", expected.getDistanceToParent(), actual.getDistanceToParent());
+									 "%s != %s", expected.getDistanceToParent(), actual.getDistanceToParent());
 		Preconditions.checkState(expected.getMag() == actual.getMag());
 		Preconditions.checkState(expected.getHypocenterLocation().equals(actual.getHypocenterLocation()));
 		Preconditions.checkState(expected.getFSSIndex() == actual.getFSSIndex());
@@ -969,22 +987,22 @@ public class ETAS_CatalogIO {
 			deque = new LinkedBlockingDeque<>(ITERABLE_PRELOAD_CAPACITY);
 			loadIndex = 0;
 			loadThread = new Thread() {
-				@Override
-				public void run() {
-					try {
-						while (loadIndex < numCatalogs) {
-							deque.putLast(doLoadCatalogBinary(in, minMag));
-							loadIndex++;
-						}
-						in.close();
-					} catch (Exception e) {
-						exception = e;
+					@Override
+					public void run() {
 						try {
+							while (loadIndex < numCatalogs) {
+								deque.putLast(doLoadCatalogBinary(in, minMag));
+								loadIndex++;
+							}
 							in.close();
-						} catch (IOException e1) {}
+						} catch (Exception e) {
+							exception = e;
+							try {
+								in.close();
+							} catch (IOException e1) {}
+						}
 					}
-				}
-			};
+				};
 			loadThread.start();
 			retIndex = 0;
 		}
@@ -1022,11 +1040,11 @@ public class ETAS_CatalogIO {
 		 */
 		private void waitUntilReady() {
 			while (deque.isEmpty() && loadThread.isAlive()) {
-//				try {
-//					Thread.sleep(100);
-//				} catch (InterruptedException e) {
-//					ExceptionUtils.throwAsRuntimeException(e);
-//				}
+				//				try {
+				//					Thread.sleep(100);
+				//				} catch (InterruptedException e) {
+				//					ExceptionUtils.throwAsRuntimeException(e);
+				//				}
 			}
 		}
 		
@@ -1055,10 +1073,10 @@ public class ETAS_CatalogIO {
 		}
 		
 		private void checkLoad() throws IOException {
-//			System.out.println("checkLoad()");
+			//			System.out.println("checkLoad()");
 			if (curEndPos > 0 && curEndPos >= curStartPos) {
 				// already loaded
-//				System.out.println("already loaded. curEndPos="+curEndPos+", curStartPos="+curStartPos);
+				//				System.out.println("already loaded. curEndPos="+curEndPos+", curStartPos="+curStartPos);
 				return;
 			}
 			current = null;
@@ -1066,7 +1084,7 @@ public class ETAS_CatalogIO {
 			curNumRuptures = -1;
 			curVersion = -1;
 			if (curIndex >= numCatalogs-1) {
-//				System.out.println("after end");
+				//				System.out.println("after end");
 				ra.close();
 				return;
 			}
@@ -1079,7 +1097,7 @@ public class ETAS_CatalogIO {
 				meta = readBinaryMetadata(ra, curVersion);
 			} catch (Exception e) {
 				System.err.println("Error reading metadata for catalog "+curIndex+" at header pos="+headerStartPos
-						+", trucated? "+e.getMessage());
+								   +", trucated? "+e.getMessage());
 				close();
 				return;
 			}
@@ -1096,8 +1114,8 @@ public class ETAS_CatalogIO {
 
 		@Override
 		public synchronized boolean hasNext() {
-//			System.out.println("BEGIN hasNext(): curIndex="+curIndex+", numCatalogs="+numCatalogs+", curEndPos="+curEndPos
-//					+", curStartPos="+curStartPos);
+			//			System.out.println("BEGIN hasNext(): curIndex="+curIndex+", numCatalogs="+numCatalogs+", curEndPos="+curEndPos
+			//					+", curStartPos="+curStartPos);
 			if (curIndex >= numCatalogs)
 				return false;
 			try {
@@ -1106,8 +1124,8 @@ public class ETAS_CatalogIO {
 				System.err.println("WARNING: truncated? "+e.getMessage());
 				return false;
 			}
-//			System.out.println("END hasNext(): curIndex="+curIndex+", numCatalogs="+numCatalogs+", curEndPos="+curEndPos
-//					+", curStartPos="+curStartPos);
+			//			System.out.println("END hasNext(): curIndex="+curIndex+", numCatalogs="+numCatalogs+", curEndPos="+curEndPos
+			//					+", curStartPos="+curStartPos);
 			return curEndPos > 0 && curEndPos >= curStartPos;
 		}
 
@@ -1169,12 +1187,12 @@ public class ETAS_CatalogIO {
 	}
 	
 	public static void consolidateResultsDirBinary(File resultsDir, File outputFile, double minMag)
-			throws IOException {
+		throws IOException {
 		consolidateResultsDirBinary(new File[] {resultsDir}, outputFile, minMag);
 	}
 
 	public static void consolidateResultsDirBinary(File[] resultsDirs, File outputFile, double minMag)
-			throws IOException {
+		throws IOException {
 		List<File> eventsFiles = Lists.newArrayList();
 
 		for (File resultsDir : resultsDirs) {
@@ -1242,15 +1260,15 @@ public class ETAS_CatalogIO {
 			}
 			int newCounter = out.size();
 			Preconditions.checkState(newCounter == Integer.MAX_VALUE || newCounter > prevCounter,
-					"Didn't write anything for catalog in %s. before: %s, after %s bytes",
-					eventsFile.getAbsolutePath(), prevCounter, newCounter);
+									 "Didn't write anything for catalog in %s. before: %s, after %s bytes",
+									 eventsFile.getAbsolutePath(), prevCounter, newCounter);
 		}
 
 		out.close();
 	}
 
 	public static void zipToBin(File zipFile, File binFile, double minMag)
-			throws ZipException, IOException {
+		throws ZipException, IOException {
 		ZipFile zip = new ZipFile(zipFile);
 
 		List<ZipEntry> entries = Lists.newArrayList();
@@ -1270,18 +1288,18 @@ public class ETAS_CatalogIO {
 
 		Collections.sort(entries, new Comparator<ZipEntry>() {
 
-			@Override
-			public int compare(ZipEntry o1, ZipEntry o2) {
-				return o1.getName().compareTo(o2.getName());
-			}
-		});
+				@Override
+				public int compare(ZipEntry o1, ZipEntry o2) {
+					return o1.getName().compareTo(o2.getName());
+				}
+			});
 
 		System.out.println("Detected "+entries.size()+" catalogs");
 
 		Preconditions.checkState(!entries.isEmpty(), "No catalogs detected!");
 
 		DataOutputStream out = new DataOutputStream(new BufferedOutputStream(
-				new FileOutputStream(binFile), buffer_len));
+																			 new FileOutputStream(binFile), buffer_len));
 
 		// write number of catalogs as int
 		out.writeInt(entries.size());
@@ -1291,7 +1309,7 @@ public class ETAS_CatalogIO {
 		for (int i=0; i<entries.size(); i++) {
 			ZipEntry catEntry = entries.get(i);
 			List<ETAS_EqkRupture> cat = loadCatalog(
-					zip.getInputStream(catEntry), minMag);
+													zip.getInputStream(catEntry), minMag);
 			writeCatalogBinary(out, cat);
 
 			if ((i+1) % printMod == 0) {
@@ -1312,7 +1330,7 @@ public class ETAS_CatalogIO {
 	}
 	
 	public static void mergeBinary(File outputFile, double minDuration, File... inputFiles)
-			throws ZipException, IOException {
+		throws ZipException, IOException {
 		int count = 0;
 		int skipped = 0;
 		
@@ -1323,7 +1341,7 @@ public class ETAS_CatalogIO {
 		
 		for (File inputFile : inputFiles) {
 			System.out.println("Handling "+inputFile.getAbsolutePath());
-//			List<List<ETAS_EqkRupture>> subCatalogs = loadCatalogs(inputFile);
+			//			List<List<ETAS_EqkRupture>> subCatalogs = loadCatalogs(inputFile);
 			for (List<ETAS_EqkRupture> catalog : getBinaryCatalogsIterable(inputFile, 0d)) {
 				double duration = 0;
 				if (!catalog.isEmpty())
@@ -1349,7 +1367,7 @@ public class ETAS_CatalogIO {
 	}
 	
 	public static void unionBinary(File outputFile, File... inputFiles)
-			throws ZipException, IOException {
+		throws ZipException, IOException {
 		Preconditions.checkArgument(inputFiles.length > 1);
 		
 		BinarayCatalogsIterable[] iterables = new BinarayCatalogsIterable[inputFiles.length];
@@ -1382,7 +1400,7 @@ public class ETAS_CatalogIO {
 					Integer id = rup.getID();
 					if (catalogMap.containsKey(id))
 						Preconditions.checkState(catalogMap.get(id).getOriginTime() == rup.getOriginTime(),
-								"Trying to union between different catalogs");
+												 "Trying to union between different catalogs");
 					else
 						catalogMap.put(id, rup);
 				}
@@ -1402,7 +1420,7 @@ public class ETAS_CatalogIO {
 	}
 	
 	public static void binaryCatalogsFilterByMag(File inputFile, File outputFile, double minMag,
-			boolean preserveChain) throws ZipException, IOException {
+												 boolean preserveChain) throws ZipException, IOException {
 		int count = 0;
 		
 		DataOutputStream out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(outputFile), buffer_len));
@@ -1498,54 +1516,54 @@ public class ETAS_CatalogIO {
 		//		File resultFile = new File("/tmp/asdf/results/sim_1/simulatedEvents.txt");
 		//		writeEventDataToFile(resultFile, loadCatalog(resultFile));
 
-//		File resultsDir = new File("/home/kevin/OpenSHA/UCERF3/etas/simulations/"
-//				+ "2015_08_21-spontaneous-full_td-grCorr/results/");
-//		for (File subDir : resultsDir.listFiles()) {
-//			if (!subDir.getName().startsWith("sim_"))
-//				continue;
-//			System.out.println(subDir.getName());
-//			File eventFile = new File(subDir, "simulatedEvents.txt");
-//			writeEventDataToFile(eventFile, loadCatalog(eventFile));
-//		}
+		//		File resultsDir = new File("/home/kevin/OpenSHA/UCERF3/etas/simulations/"
+		//				+ "2015_08_21-spontaneous-full_td-grCorr/results/");
+		//		for (File subDir : resultsDir.listFiles()) {
+		//			if (!subDir.getName().startsWith("sim_"))
+		//				continue;
+		//			System.out.println(subDir.getName());
+		//			File eventFile = new File(subDir, "simulatedEvents.txt");
+		//			writeEventDataToFile(eventFile, loadCatalog(eventFile));
+		//		}
 		
 		File dir = new File("/home/kevin/OpenSHA/UCERF3/etas/simulations/"
-//				+ "2016_02_19-mojave_m7-10yr-full_td-subSeisSupraNucl-gridSeisCorr-scale1.14-combined100k");
-				+ "2016_08_24-spontaneous-10yr-no_ert-subSeisSupraNucl-gridSeisCorr-combined");
+							//				+ "2016_02_19-mojave_m7-10yr-full_td-subSeisSupraNucl-gridSeisCorr-scale1.14-combined100k");
+							+ "2016_08_24-spontaneous-10yr-no_ert-subSeisSupraNucl-gridSeisCorr-combined");
 		binaryCatalogsFilterByMag(new File(dir, "results_m4.bin"), new File(dir, "results_m5.bin"), 5d, false);
 		
-//		File binFile = new File("/home/kevin/OpenSHA/UCERF3/etas/simulations/"
-//				+ "2016_02_17-spontaneous-1000yr-scaleMFD1p14-full_td-subSeisSupraNucl-gridSeisCorr/results_m4.bin");
-//		File binFile = new File("/home/scec-00/kmilner/ucerf3_etas_results_stampede/"
-//				+ "2016_02_17-spontaneous-1000yr-scaleMFD1p14-full_td-subSeisSupraNucl-gridSeisCorr/results.bin");
-//		int cnt = 0;
-//		File asciiDir = new File(binFile.getParentFile(), "ascii");
-//		Preconditions.checkState(asciiDir.exists() || asciiDir.mkdir());
-//		for (List<ETAS_EqkRupture> catalog : getBinaryCatalogsIterable(binFile, 0d)) {
-//			if (cnt == 100)
-//				break;
-//			writeEventDataToFile(new File(asciiDir, "catalog_"+cnt+".txt"), catalog);
-//			cnt++;
-//		}
+		//		File binFile = new File("/home/kevin/OpenSHA/UCERF3/etas/simulations/"
+		//				+ "2016_02_17-spontaneous-1000yr-scaleMFD1p14-full_td-subSeisSupraNucl-gridSeisCorr/results_m4.bin");
+		//		File binFile = new File("/home/scec-00/kmilner/ucerf3_etas_results_stampede/"
+		//				+ "2016_02_17-spontaneous-1000yr-scaleMFD1p14-full_td-subSeisSupraNucl-gridSeisCorr/results.bin");
+		//		int cnt = 0;
+		//		File asciiDir = new File(binFile.getParentFile(), "ascii");
+		//		Preconditions.checkState(asciiDir.exists() || asciiDir.mkdir());
+		//		for (List<ETAS_EqkRupture> catalog : getBinaryCatalogsIterable(binFile, 0d)) {
+		//			if (cnt == 100)
+		//				break;
+		//			writeEventDataToFile(new File(asciiDir, "catalog_"+cnt+".txt"), catalog);
+		//			cnt++;
+		//		}
 		
 		
-//		List<List<ETAS_EqkRupture>> catalogs = loadCatalogsBinary(binFile, 4d);
-////		for (int i=0; i<5; i++)
-//		for (int i=0; i<catalogs.size(); i++)
-//			writeEventDataToFile(new File(asciiDir, "catalog_"+i+"m4.txt"), catalogs.get(i));
+		//		List<List<ETAS_EqkRupture>> catalogs = loadCatalogsBinary(binFile, 4d);
+		////		for (int i=0; i<5; i++)
+		//		for (int i=0; i<catalogs.size(); i++)
+		//			writeEventDataToFile(new File(asciiDir, "catalog_"+i+"m4.txt"), catalogs.get(i));
 		
-//		File testFile = new File("/home/kevin/OpenSHA/UCERF3/etas/simulations/"
-//				+ "2015_12_08-spontaneous-1000yr-full_td-noApplyLTR/results_m4_first200.bin");
-//		for (List<ETAS_EqkRupture> catalog : getBinaryCatalogsIterable(testFile, 0d))
-//			System.out.println("Catalog has "+catalog.size()+" ruptures");
-//		System.exit(0);
+		//		File testFile = new File("/home/kevin/OpenSHA/UCERF3/etas/simulations/"
+		//				+ "2015_12_08-spontaneous-1000yr-full_td-noApplyLTR/results_m4_first200.bin");
+		//		for (List<ETAS_EqkRupture> catalog : getBinaryCatalogsIterable(testFile, 0d))
+		//			System.out.println("Catalog has "+catalog.size()+" ruptures");
+		//		System.exit(0);
 		
-//		File baseDir = new File("/home/kevin/OpenSHA/UCERF3/etas/simulations");
-//		File baseDir = new File("/auto/scec-00/kmilner/ucerf3_etas_results_stampede/");
-//		mergeBinary(new File(new File(baseDir, "2015_12_09-spontaneous-30yr-full_td-noApplyLTR"), "results.bin"),
-//				0, new File[] {
-//						new File(new File(baseDir, "2015_12_09-spontaneous-30yr-full_td-noApplyLTR"), "results_first1000.bin"),
-//						new File(new File(baseDir, "2015_12_09-spontaneous-30yr-full_td-noApplyLTR"), "results_4000more.bin")
-//				});
+		//		File baseDir = new File("/home/kevin/OpenSHA/UCERF3/etas/simulations");
+		//		File baseDir = new File("/auto/scec-00/kmilner/ucerf3_etas_results_stampede/");
+		//		mergeBinary(new File(new File(baseDir, "2015_12_09-spontaneous-30yr-full_td-noApplyLTR"), "results.bin"),
+		//				0, new File[] {
+		//						new File(new File(baseDir, "2015_12_09-spontaneous-30yr-full_td-noApplyLTR"), "results_first1000.bin"),
+		//						new File(new File(baseDir, "2015_12_09-spontaneous-30yr-full_td-noApplyLTR"), "results_4000more.bin")
+		//				});
 
 		//		File resultsZipFile = new File("/home/kevin/OpenSHA/UCERF3/etas/simulations/"
 		//				+ "2015_08_07-mojave_m7-poisson-grCorr/results_m4.zip");

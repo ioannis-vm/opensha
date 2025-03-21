@@ -219,8 +219,8 @@ public class ETAS_Simulator {
 		Writer simulatedEventsFileWriter = new BufferedWriter(new FileWriter(new File(resultsDir, "simulatedEvents.txt")), bufferSize);
 		ETAS_CatalogIO.writeEventHeaderToFile(simulatedEventsFileWriter);
 
-		Writer simulatedIMsFileWriter = new BufferedWriter(new FileWriter(new File(resultsDir, "simulatedIMs.txt")), bufferSize);
-		ETAS_CatalogIO.writeIMHeaderToFile(simulatedIMsFileWriter);
+		Writer simulatedGMMInputFileWriter = new BufferedWriter(new FileWriter(new File(resultsDir, "simulatedGMMInput.txt")), bufferSize);
+		ETAS_CatalogIO.writeGMMInputHeaderToFile(simulatedGMMInputFileWriter);
 
 		info_fr.write(simulationName+"\n");
 		info_fr.write("\nrandomSeed="+etas_utils.getRandomSeed()+"\n");
@@ -640,7 +640,7 @@ public class ETAS_Simulator {
 		final double maxPointSourceMag = etasParams.getMaxPointSourceMag();
 		
 		// Instantiate IMR
-		ScalarIMR imr = new NGAWest_2014_Averaged_AttenRel(null);
+		NGAWest_2014_Averaged_AttenRel imr = new NGAWest_2014_Averaged_AttenRel(null);
 		imr.setIntensityMeasure("SA");
 		// Instantiate Site
 		Site site = new Site(new Location(37.871, -122.259));
@@ -740,12 +740,12 @@ public class ETAS_Simulator {
 				etas_utils.setETAS_ParamsForRupture(rup, etasParams);
 			}
 			
-			ETAS_CatalogIO.writeEventToFile(simulatedEventsFileWriter, rup);
-			
 			long rupOT = rup.getOriginTime();
 
 			imr.setEqkRupture(rup);
-			ETAS_CatalogIO.writeIMToFile(simulatedIMsFileWriter, imr);
+
+			ETAS_CatalogIO.writeEventToFile(simulatedEventsFileWriter, rup);
+			ETAS_CatalogIO.writeGMMInputToFile(simulatedGMMInputFileWriter, imr);
 			
 			// now sample primary aftershock times for this event (this should be in a method because it's redundant with code above)
 			if(includeIndirectTriggering) {
@@ -962,7 +962,7 @@ public class ETAS_Simulator {
 				simulationStartTime, System.currentTimeMillis(), ETAS_Utils.magMin_DEFAULT, simulatedRupsQueue);
 		ETAS_CatalogIO.writeMetadataToFile(simulatedEventsFileWriter, meta);
 		simulatedEventsFileWriter.close();
-		simulatedIMsFileWriter.close();
+		simulatedGMMInputFileWriter.close();
 
 		ETAS_SimAnalysisTools.writeMemoryUse("Memory at end of simultation");
 		return meta;
