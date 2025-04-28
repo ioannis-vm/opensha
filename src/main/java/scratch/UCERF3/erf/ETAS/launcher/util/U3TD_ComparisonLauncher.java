@@ -45,6 +45,19 @@ import scratch.UCERF3.erf.ETAS.ETAS_EqkRupture;
 import scratch.UCERF3.erf.utils.ProbabilityModelsCalc;
 import scratch.UCERF3.utils.U3FaultSystemIO;
 
+// [JVM] `Sun Apr 27 11:35:00 PM PDT 2025` patch to capture GMM predictor variables ------------------------------
+import java.io.BufferedWriter;
+import org.opensha.sha.imr.ScalarIMR;
+import org.opensha.sha.imr.attenRelImpl.NGAWest_2014_Averaged_AttenRel;
+import org.opensha.sha.faultSurface.RuptureSurface;
+import org.opensha.commons.data.Site;
+import org.opensha.sha.imr.param.SiteParams.Vs30_Param;
+import org.opensha.sha.imr.param.SiteParams.Vs30_TypeParam;
+import org.opensha.sha.imr.param.SiteParams.DepthTo2pt5kmPerSecParam;
+import org.opensha.sha.imr.param.SiteParams.DepthTo1pt0kmPerSecParam;
+import org.opensha.commons.geo.Location;
+// ---------------------------------------------------------------------------------------------------------------
+
 public class U3TD_ComparisonLauncher {
 	
 	private static MagDependentAperiodicityOptions COV_DEFAULT = MagDependentAperiodicityOptions.MID_VALUES;
@@ -86,13 +99,21 @@ public class U3TD_ComparisonLauncher {
 				"COV option for time dependent model. One of: LOW_VALUES, MID_VALUES, HIGH_VALUES. Default: "+COV_DEFAULT.name());
 		covOption.setRequired(false);
 		ops.addOption(covOption);
+
+		// [JVM] `Sun Apr 27 11:35:00 PM PDT 2025` patch to capture GMM predictor variables ------------------------------
+		Option seedOption = new Option("s", "random-seed", true,
+			     "Optional random seed for reproducibility");
+		seedOption.setRequired(false);
+		ops.addOption(seedOption);
+		// ---------------------------------------------------------------------------------------------------------------
+
 		
 		return ops;
 	}
 
 	public static void main(String[] args) {
 		if (args.length == 1 && args[0].equals("--hardcoded")) {
-			String argsStr = "--duration 10 --fss-file /home/kevin/git/ucerf3-etas-launcher/inputs/"
+			String argsStr = "--duration 10 --fss-file /home/john_vm/Documents/UCB/research/projects/2024-10-12_Aftershock/external_resources/ucerf3-etas-launcher/inputs/"
 					+ "2013_05_10-ucerf3p3-production-10runs_COMPOUND_SOL_FM3_1_SpatSeisU3_MEAN_BRANCH_AVG_SOL.zip"
 //					+ " --start-year 2017"
 					+ " --cov MID_VALUES"
@@ -175,6 +196,13 @@ public class U3TD_ComparisonLauncher {
 		} else {
 			erf.setParameter(IncludeBackgroundParam.NAME, IncludeBackgroundOption.EXCLUDE);
 		}
+
+		// [JVM] `Sun Apr 27 11:35:00 PM PDT 2025` patch to capture GMM predictor variables ------------------------------
+		Long randomSeed = null;
+		if (cmd.hasOption("random-seed")) {
+			randomSeed = Long.parseLong(cmd.getOptionValue("random-seed"));
+		}
+		// ---------------------------------------------------------------------------------------------------------------
 		
 		if (!ti)
 			erf.eraseDatesOfLastEventAfterStartTime();
@@ -190,7 +218,10 @@ public class U3TD_ComparisonLauncher {
 		
 		System.out.println("Simulating...");
 		try {
-			calc.testER_NextXyrSimulation(outputDir, null, 1, false, null, (double)duration);
+			// [JVM] `Sun Apr 27 11:35:00 PM PDT 2025` patch to capture GMM predictor variables ------------------------------
+			// calc.testER_NextXyrSimulation(outputDir, null, 1, false, null, (double)duration);
+			calc.testER_NextXyrSimulation(outputDir, null, 1, false, randomSeed, (double)duration);
+			// ---------------------------------------------------------------------------------------------------------------
 		} catch (IOException e) {
 			System.out.println("Error!");
 			e.printStackTrace();
@@ -202,7 +233,35 @@ public class U3TD_ComparisonLauncher {
 			FaultSystemRupSet rupSet = fss.getRupSet();
 			File outputFile = new File(outputDir, "sampledEventsData.txt");
 			List<ETAS_EqkRupture> etasRups = new ArrayList<>();
-			Random r = new Random();
+
+			// [JVM] `Sun Apr 27 11:35:00 PM PDT 2025` patch to capture GMM predictor variables ------------------------------
+			// Random r = new Random();
+			Random r = randomSeed == null ? new Random() : new Random(randomSeed);
+
+			NGAWest_2014_Averaged_AttenRel imr = new NGAWest_2014_Averaged_AttenRel(null);
+			imr.setIntensityMeasure("SA");
+
+			Site site = new Site(new Location(37.871, -122.259)); // Berkeley coordinates
+
+			site.addParameter(new Vs30_Param());
+			site.addParameter(new Vs30_TypeParam());
+			site.addParameter(new DepthTo2pt5kmPerSecParam());
+			site.addParameter(new DepthTo1pt0kmPerSecParam());
+
+			site.getParameter("Vs30").setValue(733.4);
+			site.getParameter("Vs30 Type").setValue(Vs30_TypeParam.VS30_TYPE_INFERRED);
+			site.getParameter("Depth 2.5 km/sec").setValue(0.88);
+			site.getParameter("Depth 1.0 km/sec").setValue(70.0);
+
+			imr.setUserMaxDistance(200);
+			imr.setSite(site);
+
+			File gmmOutputFile = new File(outputDir, "gmmInputs.txt");
+			BufferedWriter gmmWriter = Files.newWriter(gmmOutputFile, Charset.defaultCharset());
+
+			gmmWriter.write(ETAS_CatalogIO.GMMINPUT_FILE_HEADER + "\n");
+			// ---------------------------------------------------------------------------------------------------------------
+
 			for (String line : Files.readLines(outputFile, Charset.defaultCharset())) {
 				line = line.trim();
 				if (line.startsWith("nthRupIndex") || line.startsWith("#"))
@@ -227,6 +286,19 @@ public class U3TD_ComparisonLauncher {
 					int srcIndex = erf.getSrcIndexForNthRup(nthIndex);
 					etasRup.setGridNodeIndex(srcIndex - erf.getNumFaultSystemSources());
 					etasRups.add(etasRup);
+					// [JVM] `Sun Apr 27 11:35:00 PM PDT 2025` patch to capture GMM predictor variables ------------------------------
+					double dip = Double.NaN;
+					if (rup.getRuptureSurface() != null)
+						dip = rup.getRuptureSurface().getAveDip();
+
+					if (!Double.isFinite(dip)) {
+						if (rup.getRuptureSurface() instanceof PointSurface) {
+							((PointSurface) rup.getRuptureSurface()).setAveDip(90.0);
+						}
+					}
+					imr.setEqkRupture(rup);
+					gmmWriter.write(ETAS_CatalogIO.getGMMInputFileLine(imr) + "\n");
+					// ---------------------------------------------------------------------------------------------------------------
 				} else {
 					Preconditions.checkState(fssIndex >= 0 && fssIndex < rupSet.getNumRuptures(), "bad FSS index=%s", fssIndex);
 					LocationList rupLocs = rupSet.getSurfaceForRupture(fssIndex, 1d).getEvenlyDiscritizedListOfLocsOnSurface();
@@ -237,11 +309,27 @@ public class U3TD_ComparisonLauncher {
 					etasRup.setID(id);
 					etasRup.setFSSIndex(fssIndex);
 					etasRups.add(etasRup);
+					// [JVM] `Sun Apr 27 11:35:00 PM PDT 2025` patch to capture GMM predictor variables ------------------------------
+					double dip = Double.NaN;
+					if (rup.getRuptureSurface() != null)
+						dip = rup.getRuptureSurface().getAveDip();
+
+					if (!Double.isFinite(dip)) {
+						if (rup.getRuptureSurface() instanceof PointSurface) {
+							((PointSurface) rup.getRuptureSurface()).setAveDip(90.0);
+						}
+					}
+					imr.setEqkRupture(rup);
+					gmmWriter.write(ETAS_CatalogIO.getGMMInputFileLine(imr) + "\n");
+					// ---------------------------------------------------------------------------------------------------------------
 				}
 			}
 			Files.move(outputFile, new File(outputDir, "sampledEventsData_orig.txt"));
 			System.out.println("Writing new output file");
 			ETAS_CatalogIO.writeEventDataToFile(outputFile, etasRups);
+			// ---------------------------------------------------------------------------------------------------------------
+			gmmWriter.close();
+			// ---------------------------------------------------------------------------------------------------------------
 		} catch (IOException e) {
 			System.out.println("ERROR!");
 			e.printStackTrace();
